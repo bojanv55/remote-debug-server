@@ -76,7 +76,7 @@ public class ClientConnection implements Runnable {
 
 	private void stopDebugging() {
 		try {
-			LOG.info("Stopping debugging");
+			LOG.info("Stopping debugging on port " + this.port);
 			this.process.stop();
 			portToProcess.remove(this.port);  //remove connection bound to port
 			clientSocket.close();

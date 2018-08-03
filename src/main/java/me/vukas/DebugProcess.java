@@ -14,8 +14,11 @@ public class DebugProcess implements Runnable {
 	private PrintWriter out;
 	private Process process;
 	private String command;
-	private Pattern patternPort = Pattern.compile("<START_DEBUG_PROCESS_PORT />");
+	private String workDir;
 	private Integer port;
+	private boolean stopped;
+
+	private Pattern patternJava = Pattern.compile("\\s\\|\\s((?!bin/java.exe).*)bin/java.exe");
 
 	DebugProcess(PrintWriter out, String command, Integer port) {
 		this.out = out;
@@ -23,23 +26,49 @@ public class DebugProcess implements Runnable {
 		this.port = port;
 	}
 
-	private String commandWithPort(){
+	private String prepareCommand(){
 		String command = this.command;
-		Matcher matcherPort = patternPort.matcher(command);
-		if (matcherPort.find()) {
-			command = matcherPort.replaceFirst(String.valueOf(this.port));
+
+		command = command.replace("\\", "/");
+
+		String rplc = "";
+		Matcher matcherJava = patternJava.matcher(command);
+		if (matcherJava.find()) {
+			rplc = matcherJava.group(1);
 		}
+
+		command = command.replace(rplc, "/opt/jdk/");
+
+		for(char c = 'A'; c<='Z'; c++){
+			command = command.replace(c+":/", "/"+Character.toLowerCase(c)+"/");
+		}
+
+		command = command.replace("java.exe", "java -agentlib:jdwp=transport=dt_socket,address="+this.port+",suspend=y,server=y");
+		command = command.replace(";", ":");
+
+		String workDir = command.substring(0, command.indexOf(" | "));
+
+		command = command.substring(command.indexOf(" | ")+3);
+
+		this.workDir = workDir;
+
+		//command = command.replace("classpath \"", "classpath \"" + workDir +":");
+
 		return command;
 	}
 
 	private void start() throws IOException {
-		String command = this.commandWithPort();
-		String execCommand = "exec " + command;
+
+		String command = this.prepareCommand();
+
+		String execCommand = "cd " + workDir + " && " + "exec " + command;
 		ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", execCommand);
 		pb.redirectErrorStream(true);
-		LOG.info("Starting process: " + command);
-		this.process = pb.start();
-		this.writeOutput(this.process.getInputStream());
+		if(!stopped) {
+			LOG.info("Starting process: " + command);
+			this.process = pb.start();
+			this.writeOutput(this.process.getInputStream());
+		}
 	}
 
 	private void writeOutput(InputStream is) throws IOException {
@@ -51,9 +80,23 @@ public class DebugProcess implements Runnable {
 	}
 
 	void stop() {
+		this.stopped = true;
 		if (this.process != null) {
-			LOG.info("Stopping process");
+			LOG.info("Stopping process on port " + this.port);
 			this.process.destroy();
+			try {
+				Thread.sleep(5000);
+			}
+			catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			if(this.process.isAlive()){
+				LOG.info("Forcing stop on port " + this.port);
+				this.process.destroyForcibly();
+			}
+		}
+		else{
+			LOG.info("Process is null for port " + this.port);
 		}
 	}
 
